@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Prefer clear, self-documenting code. Add comments only for non-obvious "why" decisions. Use meaningful names for variables and functions. Keep functions small and focused.
