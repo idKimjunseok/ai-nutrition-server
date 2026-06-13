@@ -142,6 +142,8 @@ def _normalize_food_dicts(parsed: Any) -> List[Dict[str, Any]]:
         return [x for x in parsed if isinstance(x, dict)]
     if not isinstance(parsed, dict):
         raise ValueError("JSON 루트는 객체 또는 배열이어야 합니다.")
+    if not parsed:
+        return []
     for key in ("foods", "items", "results", "dishes"):
         inner = parsed.get(key)
         if isinstance(inner, list) and all(isinstance(x, dict) for x in inner):
@@ -189,10 +191,8 @@ def _llm_text_to_calorie_result(image_size_bytes: Optional[int], llm_text: str, 
     """
     parsed = _parse_json_from_llm(llm_text)
     food_dicts = _normalize_food_dicts(parsed)
-    if not food_dicts:
-        raise ValueError("음식 항목이 비어 있습니다.")
     items = [_dict_to_detected_item(fd) for fd in food_dicts]
-    total = sum(i.calories_kcal for i in items)
+    total = sum(i.calories_kcal for i in items) if items else None
     is_image = image_size_bytes is not None
     return CalorieResult(
         request_id=str(uuid.uuid4()),
@@ -213,17 +213,29 @@ def _llm_text_to_calorie_result(image_size_bytes: Optional[int], llm_text: str, 
 # ---------------------------------------------------------------------------
 # Consensus helpers
 # ---------------------------------------------------------------------------
+def _no_food_message(image_received: bool) -> str:
+    """Gemini/Claude 둘 다 음식을 찾지 못했을 때 사용자에게 보여줄 메시지."""
+    if image_received:
+        return "이미지에서 음식을 찾을 수 없습니다. 음식이 잘 보이는 사진으로 다시 촬영해주세요."
+    return "입력한 텍스트에서 음식 정보를 찾을 수 없습니다. 음식 이름을 다시 확인해주세요."
+
+
 def _consensus_merge(gemini: CalorieResult, claude: CalorieResult) -> CalorieResult:
     """
     Gemini + Claude 결과를 AI별로 분리하여 반환합니다.
     앱에서 geminiItems / claudeItems 를 각각 표시하고 유저가 원하는 AI 결과를 선택합니다.
     """
+    if not gemini.gemini_items and not claude.claude_items:
+        message = _no_food_message(gemini.image_received)
+    else:
+        message = "Gemini와 Claude 다중 AI 교차 검증이 완료되었습니다."
+
     return CalorieResult(
         request_id=str(uuid.uuid4()),
         analyzed_at=datetime.now(timezone.utc).isoformat(),
         image_received=gemini.image_received,  # 이미지 분석이면 True, 텍스트면 False
         image_size_bytes=claude.image_size_bytes or gemini.image_size_bytes,
-        message="Gemini와 Claude 다중 AI 교차 검증이 완료되었습니다.",
+        message=message,
         gemini_items=gemini.gemini_items,
         claude_items=claude.claude_items,
         gemini_total_calories_kcal=gemini.gemini_total_calories_kcal,
@@ -318,12 +330,16 @@ def _finalize_parallel_results(
 
     if isinstance(claude_res, Exception):
         if isinstance(gemini_res, CalorieResult):
+            if not gemini_res.gemini_items:
+                message = _no_food_message(image_received)
+            else:
+                message = "Claude 호출이 실패하여 Gemini 단독 결과로 반환합니다."
             return CalorieResult(
                 request_id=str(uuid.uuid4()),
                 analyzed_at=datetime.now(timezone.utc).isoformat(),
                 image_received=image_received,
                 image_size_bytes=image_size_bytes,
-                message="Claude 호출이 실패하여 Gemini 단독 결과로 반환합니다.",
+                message=message,
                 gemini_items=gemini_res.gemini_items,
                 claude_items=[],
                 gemini_total_calories_kcal=gemini_res.gemini_total_calories_kcal,
@@ -334,12 +350,16 @@ def _finalize_parallel_results(
 
     if isinstance(gemini_res, Exception):
         if isinstance(claude_res, CalorieResult):
+            if not claude_res.claude_items:
+                message = _no_food_message(image_received)
+            else:
+                message = "Gemini 호출이 실패하여 Claude 단독 결과로 반환합니다."
             return CalorieResult(
                 request_id=str(uuid.uuid4()),
                 analyzed_at=datetime.now(timezone.utc).isoformat(),
                 image_received=image_received,
                 image_size_bytes=image_size_bytes,
-                message="Gemini 호출이 실패하여 Claude 단독 결과로 반환합니다.",
+                message=message,
                 gemini_items=[],
                 claude_items=claude_res.claude_items,
                 gemini_total_calories_kcal=None,
@@ -382,6 +402,7 @@ def _build_text_prompt(food_text: str) -> str:
         "다음 음식 목록의 각 항목에 대해 예상 1인분 기준 칼로리와 영양소를 분석해서 "
         "아래 JSON 배열 형식으로만 응답해. 다른 설명 텍스트는 절대 포함하지 마. "
         "음식이 쉼표나 공백으로 구분되어 있으면 각각 별도 항목으로 처리해. "
+        "입력에 음식으로 인식할 수 있는 내용이 전혀 없으면 빈 배열 []로만 응답해. "
         "모든 숫자 값은 단위 없이 숫자만 입력해.\n\n"
         f"음식: {food_text}\n\n"
         "[\n"
