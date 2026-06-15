@@ -263,6 +263,27 @@ def _anthropic_image_block(mime_type: str, image_bytes: bytes) -> Dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# AI 호출 공통 타임아웃
+# ---------------------------------------------------------------------------
+LLM_CALL_TIMEOUT_SECONDS = 15.0
+
+
+async def _ainvoke_with_timeout(llm: Any, message: "HumanMessage", timeout: float = LLM_CALL_TIMEOUT_SECONDS) -> Any:
+    """
+    LLM 호출에 하드 타임아웃을 건다.
+    langchain/google-api-core 내부 재시도가 매우 길게(수십~100초+) 걸릴 수 있고,
+    ainvoke가 내부적으로 동기 호출을 포함해 이벤트 루프를 블로킹할 수 있어
+    클라이언트의 timeout/max_retries 설정만으로는 신뢰할 수 없다.
+    별도 스레드(asyncio.to_thread)에서 동기 invoke를 실행해 이벤트 루프를 막지 않고
+    asyncio.wait_for로 상한선을 강제한다.
+    """
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(llm.invoke, [message]), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(f"{timeout:.0f}초 내에 응답을 받지 못했습니다 (timeout)") from exc
+
+
+# ---------------------------------------------------------------------------
 # Public service API
 # ---------------------------------------------------------------------------
 async def _analyze_with_gemini(settings: Settings, image_bytes: bytes, mime_for_llm: str, upload_size: int) -> CalorieResult:
@@ -272,9 +293,15 @@ async def _analyze_with_gemini(settings: Settings, image_bytes: bytes, mime_for_
         raise HTTPException(status_code=503, detail="GOOGLE_API_KEY가 설정되지 않았습니다.")
 
     message = HumanMessage(content=[{"type": "text", "text": settings.prompt}, _lc_image_url_block(mime_for_llm, image_bytes)])
-    llm = ChatGoogleGenerativeAI(model=settings.gemini_model_id, api_key=settings.google_api_key, temperature=0.2)
+    llm = ChatGoogleGenerativeAI(
+        model=settings.gemini_model_id,
+        api_key=settings.google_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Gemini 호출 실패")
         raise HTTPException(status_code=502, detail=f"Gemini 호출 실패: {exc}") from exc
@@ -294,9 +321,15 @@ async def _analyze_with_claude(settings: Settings, image_bytes: bytes, mime_for_
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY가 설정되지 않았습니다.")
 
     message = HumanMessage(content=[{"type": "text", "text": settings.prompt}, _anthropic_image_block(mime_for_llm, image_bytes)])
-    llm = ChatAnthropic(model=settings.claude_model_id, api_key=settings.anthropic_api_key, temperature=0.2)
+    llm = ChatAnthropic(
+        model=settings.claude_model_id,
+        api_key=settings.anthropic_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Claude 호출 실패")
         raise HTTPException(status_code=502, detail=f"Claude 호출 실패: {exc}") from exc
@@ -427,9 +460,15 @@ async def _analyze_text_with_gemini(settings: Settings, food_text: str) -> Calor
 
     prompt = _build_text_prompt(food_text)
     message = HumanMessage(content=[{"type": "text", "text": prompt}])
-    llm = ChatGoogleGenerativeAI(model=settings.gemini_model_id, api_key=settings.google_api_key, temperature=0.2)
+    llm = ChatGoogleGenerativeAI(
+        model=settings.gemini_model_id,
+        api_key=settings.google_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Gemini 텍스트 분석 호출 실패")
         raise HTTPException(status_code=502, detail=f"Gemini 호출 실패: {exc}") from exc
@@ -450,9 +489,15 @@ async def _analyze_text_with_claude(settings: Settings, food_text: str) -> Calor
 
     prompt = _build_text_prompt(food_text)
     message = HumanMessage(content=[{"type": "text", "text": prompt}])
-    llm = ChatAnthropic(model=settings.claude_model_id, api_key=settings.anthropic_api_key, temperature=0.2)
+    llm = ChatAnthropic(
+        model=settings.claude_model_id,
+        api_key=settings.anthropic_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Claude 텍스트 분석 호출 실패")
         raise HTTPException(status_code=502, detail=f"Claude 호출 실패: {exc}") from exc
@@ -559,9 +604,15 @@ async def _analyze_daily_calories_with_gemini(
         raise HTTPException(status_code=503, detail="GOOGLE_API_KEY가 설정되지 않았습니다.")
 
     message = HumanMessage(content=[{"type": "text", "text": _build_daily_calorie_prompt(request)}])
-    llm = ChatGoogleGenerativeAI(model=settings.gemini_model_id, api_key=settings.google_api_key, temperature=0.2)
+    llm = ChatGoogleGenerativeAI(
+        model=settings.gemini_model_id,
+        api_key=settings.google_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Gemini 하루 권장 칼로리 분석 호출 실패")
         raise HTTPException(status_code=502, detail=f"Gemini 호출 실패: {exc}") from exc
@@ -584,9 +635,15 @@ async def _analyze_daily_calories_with_claude(
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY가 설정되지 않았습니다.")
 
     message = HumanMessage(content=[{"type": "text", "text": _build_daily_calorie_prompt(request)}])
-    llm = ChatAnthropic(model=settings.claude_model_id, api_key=settings.anthropic_api_key, temperature=0.2)
+    llm = ChatAnthropic(
+        model=settings.claude_model_id,
+        api_key=settings.anthropic_api_key,
+        temperature=0.2,
+        timeout=15,
+        max_retries=0,
+    )
     try:
-        response = await llm.ainvoke([message])
+        response = await _ainvoke_with_timeout(llm, message)
     except Exception as exc:
         logger.exception("Claude 하루 권장 칼로리 분석 호출 실패")
         raise HTTPException(status_code=502, detail=f"Claude 호출 실패: {exc}") from exc
