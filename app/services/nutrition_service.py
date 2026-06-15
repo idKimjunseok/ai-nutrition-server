@@ -184,7 +184,7 @@ def _dict_to_detected_item(d: Dict[str, Any], default_confidence: float = 0.85) 
     )
 
 
-def _llm_text_to_calorie_result(image_size_bytes: Optional[int], llm_text: str, source: str) -> CalorieResult:
+def _llm_text_to_calorie_result(image_size_bytes: Optional[int], llm_text: str, source: str, lang: str = "ko") -> CalorieResult:
     """
     LLM 텍스트 응답을 CalorieResult로 변환합니다.
     source: "gemini" 또는 "claude" — 어느 AI의 결과인지 구분하여 각 AI 전용 필드에 저장합니다.
@@ -203,32 +203,99 @@ def _llm_text_to_calorie_result(image_size_bytes: Optional[int], llm_text: str, 
         claude_items=items if source == "claude" else [],
         gemini_total_calories_kcal=total if source == "gemini" else None,
         claude_total_calories_kcal=total if source == "claude" else None,
-        disclaimer=(
-            "본 결과는 생성형 AI의 추정치이며 의학적·영양학적 진단 또는 개인별 식단 지침을 "
-            "대체하지 않습니다."
-        ),
+        disclaimer=_DISCLAIMER[_normalize_lang(lang)],
     )
+
+
+# ---------------------------------------------------------------------------
+# 다국어 메시지
+# ---------------------------------------------------------------------------
+def _normalize_lang(lang: Optional[str]) -> str:
+    """'en'으로 시작하면 영어, 그 외에는 한국어로 취급합니다."""
+    return "en" if (lang or "").strip().lower().startswith("en") else "ko"
+
+
+def lang_from_accept_language(accept_language: Optional[str]) -> str:
+    """
+    `Accept-Language` 헤더(예: "en-US,en;q=0.9,ko;q=0.8")에서
+    우선순위가 가장 높은 언어를 골라 "en" 또는 "ko"로 정규화합니다.
+    헤더가 없거나 파싱할 수 없으면 "ko"를 기본값으로 사용합니다.
+    """
+    if not accept_language:
+        return "ko"
+
+    best_tag, best_q = "ko", -1.0
+    for part in accept_language.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        tag, _, q_part = part.partition(";")
+        tag = tag.strip()
+        if not tag:
+            continue
+        q = 1.0
+        q_part = q_part.strip()
+        if q_part.startswith("q="):
+            try:
+                q = float(q_part[2:])
+            except ValueError:
+                q = 1.0
+        if q > best_q:
+            best_q = q
+            best_tag = tag
+
+    return _normalize_lang(best_tag.split("-")[0])
+
+
+_DISCLAIMER = {
+    "ko": "본 결과는 생성형 AI의 추정치이며 의학적·영양학적 진단 또는 개인별 식단 지침을 대체하지 않습니다.",
+    "en": "These results are AI-generated estimates and are not a substitute for medical or nutritional advice.",
+}
+
+_CONSENSUS_MESSAGE = {
+    "ko": "Gemini와 Claude 다중 AI 교차 검증이 완료되었습니다.",
+    "en": "Cross-verification by Gemini and Claude is complete.",
+}
+
+_CLAUDE_FAILED_MESSAGE = {
+    "ko": "Claude 호출이 실패하여 Gemini 단독 결과로 반환합니다.",
+    "en": "The Claude call failed; returning Gemini-only results.",
+}
+
+_GEMINI_FAILED_MESSAGE = {
+    "ko": "Gemini 호출이 실패하여 Claude 단독 결과로 반환합니다.",
+    "en": "The Gemini call failed; returning Claude-only results.",
+}
+
+_NO_FOOD_IMAGE_MESSAGE = {
+    "ko": "이미지에서 음식을 찾을 수 없습니다. 음식이 잘 보이는 사진으로 다시 촬영해주세요.",
+    "en": "No food was detected in the image. Please retake the photo with the food clearly visible.",
+}
+
+_NO_FOOD_TEXT_MESSAGE = {
+    "ko": "입력한 텍스트에서 음식 정보를 찾을 수 없습니다. 음식 이름을 다시 확인해주세요.",
+    "en": "No food information was found in the text. Please check the food name and try again.",
+}
 
 
 # ---------------------------------------------------------------------------
 # Consensus helpers
 # ---------------------------------------------------------------------------
-def _no_food_message(image_received: bool) -> str:
+def _no_food_message(image_received: bool, lang: str = "ko") -> str:
     """Gemini/Claude 둘 다 음식을 찾지 못했을 때 사용자에게 보여줄 메시지."""
-    if image_received:
-        return "이미지에서 음식을 찾을 수 없습니다. 음식이 잘 보이는 사진으로 다시 촬영해주세요."
-    return "입력한 텍스트에서 음식 정보를 찾을 수 없습니다. 음식 이름을 다시 확인해주세요."
+    lang = _normalize_lang(lang)
+    return _NO_FOOD_IMAGE_MESSAGE[lang] if image_received else _NO_FOOD_TEXT_MESSAGE[lang]
 
 
-def _consensus_merge(gemini: CalorieResult, claude: CalorieResult) -> CalorieResult:
+def _consensus_merge(gemini: CalorieResult, claude: CalorieResult, lang: str = "ko") -> CalorieResult:
     """
     Gemini + Claude 결과를 AI별로 분리하여 반환합니다.
     앱에서 geminiItems / claudeItems 를 각각 표시하고 유저가 원하는 AI 결과를 선택합니다.
     """
     if not gemini.gemini_items and not claude.claude_items:
-        message = _no_food_message(gemini.image_received)
+        message = _no_food_message(gemini.image_received, lang)
     else:
-        message = "Gemini와 Claude 다중 AI 교차 검증이 완료되었습니다."
+        message = _CONSENSUS_MESSAGE[_normalize_lang(lang)]
 
     return CalorieResult(
         request_id=str(uuid.uuid4()),
@@ -286,13 +353,14 @@ async def _ainvoke_with_timeout(llm: Any, message: "HumanMessage", timeout: floa
 # ---------------------------------------------------------------------------
 # Public service API
 # ---------------------------------------------------------------------------
-async def _analyze_with_gemini(settings: Settings, image_bytes: bytes, mime_for_llm: str, upload_size: int) -> CalorieResult:
+async def _analyze_with_gemini(settings: Settings, image_bytes: bytes, mime_for_llm: str, upload_size: int, lang: str = "ko") -> CalorieResult:
     if _LANGCHAIN_GOOGLE_IMPORT_ERROR is not None or ChatGoogleGenerativeAI is None or HumanMessage is None:
         raise HTTPException(status_code=500, detail=f"langchain-google-genai를 불러올 수 없습니다: {_LANGCHAIN_GOOGLE_IMPORT_ERROR}")
     if not settings.google_api_key:
         raise HTTPException(status_code=503, detail="GOOGLE_API_KEY가 설정되지 않았습니다.")
 
-    message = HumanMessage(content=[{"type": "text", "text": settings.prompt}, _lc_image_url_block(mime_for_llm, image_bytes)])
+    prompt_text = settings.prompt if _normalize_lang(lang) == "ko" else settings.prompt_en
+    message = HumanMessage(content=[{"type": "text", "text": prompt_text}, _lc_image_url_block(mime_for_llm, image_bytes)])
     llm = ChatGoogleGenerativeAI(
         model=settings.gemini_model_id,
         api_key=settings.google_api_key,
@@ -308,19 +376,20 @@ async def _analyze_with_gemini(settings: Settings, image_bytes: bytes, mime_for_
 
     text = _message_content_to_text(response.content)
     try:
-        return _llm_text_to_calorie_result(upload_size, text, source="gemini")
+        return _llm_text_to_calorie_result(upload_size, text, source="gemini", lang=lang)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("Gemini 응답 JSON 파싱 실패: %s", text[:500])
         raise HTTPException(status_code=502, detail=f"Gemini 응답을 CalorieResult로 변환 실패: {exc}") from exc
 
 
-async def _analyze_with_claude(settings: Settings, image_bytes: bytes, mime_for_llm: str, upload_size: int) -> CalorieResult:
+async def _analyze_with_claude(settings: Settings, image_bytes: bytes, mime_for_llm: str, upload_size: int, lang: str = "ko") -> CalorieResult:
     if _LANGCHAIN_ANTHROPIC_IMPORT_ERROR is not None or ChatAnthropic is None or HumanMessage is None:
         raise HTTPException(status_code=500, detail=f"langchain-anthropic을 불러올 수 없습니다: {_LANGCHAIN_ANTHROPIC_IMPORT_ERROR}")
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY가 설정되지 않았습니다.")
 
-    message = HumanMessage(content=[{"type": "text", "text": settings.prompt}, _anthropic_image_block(mime_for_llm, image_bytes)])
+    prompt_text = settings.prompt if _normalize_lang(lang) == "ko" else settings.prompt_en
+    message = HumanMessage(content=[{"type": "text", "text": prompt_text}, _anthropic_image_block(mime_for_llm, image_bytes)])
     llm = ChatAnthropic(
         model=settings.claude_model_id,
         api_key=settings.anthropic_api_key,
@@ -336,7 +405,7 @@ async def _analyze_with_claude(settings: Settings, image_bytes: bytes, mime_for_
 
     text = _message_content_to_text(response.content)
     try:
-        return _llm_text_to_calorie_result(upload_size, text, source="claude")
+        return _llm_text_to_calorie_result(upload_size, text, source="claude", lang=lang)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("Claude 응답 JSON 파싱 실패: %s", text[:500])
         raise HTTPException(status_code=502, detail=f"Claude 응답을 CalorieResult로 변환 실패: {exc}") from exc
@@ -350,6 +419,7 @@ def _finalize_parallel_results(
     claude_res: Any,
     image_received: bool,
     image_size_bytes: Optional[int],
+    lang: str = "ko",
 ) -> CalorieResult:
     """
     Gemini / Claude 병렬 호출 결과를 받아 fallback 처리 후 최종 CalorieResult를 반환합니다.
@@ -364,9 +434,9 @@ def _finalize_parallel_results(
     if isinstance(claude_res, Exception):
         if isinstance(gemini_res, CalorieResult):
             if not gemini_res.gemini_items:
-                message = _no_food_message(image_received)
+                message = _no_food_message(image_received, lang)
             else:
-                message = "Claude 호출이 실패하여 Gemini 단독 결과로 반환합니다."
+                message = _CLAUDE_FAILED_MESSAGE[_normalize_lang(lang)]
             return CalorieResult(
                 request_id=str(uuid.uuid4()),
                 analyzed_at=datetime.now(timezone.utc).isoformat(),
@@ -384,9 +454,9 @@ def _finalize_parallel_results(
     if isinstance(gemini_res, Exception):
         if isinstance(claude_res, CalorieResult):
             if not claude_res.claude_items:
-                message = _no_food_message(image_received)
+                message = _no_food_message(image_received, lang)
             else:
-                message = "Gemini 호출이 실패하여 Claude 단독 결과로 반환합니다."
+                message = _GEMINI_FAILED_MESSAGE[_normalize_lang(lang)]
             return CalorieResult(
                 request_id=str(uuid.uuid4()),
                 analyzed_at=datetime.now(timezone.utc).isoformat(),
@@ -401,7 +471,7 @@ def _finalize_parallel_results(
             )
         raise HTTPException(status_code=502, detail=f"Gemini 호출 실패, Claude 결과도 비정상입니다: {gemini_res}")
 
-    return _consensus_merge(gemini_res, claude_res)  # type: ignore[arg-type]
+    return _consensus_merge(gemini_res, claude_res, lang)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -412,25 +482,49 @@ async def analyze_image_parallel_consensus(
     image_bytes: bytes,
     mime_for_llm: str,
     original_upload_size_bytes: int,
+    lang: str = "ko",
 ) -> CalorieResult:
     """Gemini + Claude 병렬 이미지 분석 후 AI별 결과를 반환합니다."""
     results = await asyncio.gather(
-        _analyze_with_gemini(settings, image_bytes, mime_for_llm, original_upload_size_bytes),
-        _analyze_with_claude(settings, image_bytes, mime_for_llm, original_upload_size_bytes),
+        _analyze_with_gemini(settings, image_bytes, mime_for_llm, original_upload_size_bytes, lang),
+        _analyze_with_claude(settings, image_bytes, mime_for_llm, original_upload_size_bytes, lang),
         return_exceptions=True,
     )
     return _finalize_parallel_results(
         results[0], results[1],
         image_received=True,
         image_size_bytes=original_upload_size_bytes,
+        lang=lang,
     )
 
 
 # ---------------------------------------------------------------------------
 # 텍스트 분석 — LLM 호출
 # ---------------------------------------------------------------------------
-def _build_text_prompt(food_text: str) -> str:
+def _build_text_prompt(food_text: str, lang: str = "ko") -> str:
     """텍스트 음식명 분석용 프롬프트를 생성합니다."""
+    if _normalize_lang(lang) == "en":
+        return (
+            "For each item in the following food list, estimate the calories and macronutrients "
+            "for one typical serving and respond ONLY in the following JSON array format. "
+            "Do not include any explanatory text. "
+            "If the items are separated by commas or spaces, treat each as a separate entry. "
+            "If nothing in the input can be recognized as food, respond with an empty array []. "
+            "Write all food names and portion descriptions in English. "
+            "All numeric values must be plain numbers without units.\n\n"
+            f"Food: {food_text}\n\n"
+            "[\n"
+            "  {\n"
+            '    "food_name": "Food name in English",\n'
+            '    "calories_kcal": calorie_number,\n'
+            '    "portion_description": "Estimated serving size",\n'
+            '    "carbs_g": carbohydrate_grams_number,\n'
+            '    "protein_g": protein_grams_number,\n'
+            '    "fat_g": fat_grams_number,\n'
+            '    "confidence": confidence_number_between_0_and_1\n'
+            "  }\n"
+            "]"
+        )
     return (
         "다음 음식 목록의 각 항목에 대해 예상 1인분 기준 칼로리와 영양소를 분석해서 "
         "아래 JSON 배열 형식으로만 응답해. 다른 설명 텍스트는 절대 포함하지 마. "
@@ -452,13 +546,13 @@ def _build_text_prompt(food_text: str) -> str:
     )
 
 
-async def _analyze_text_with_gemini(settings: Settings, food_text: str) -> CalorieResult:
+async def _analyze_text_with_gemini(settings: Settings, food_text: str, lang: str = "ko") -> CalorieResult:
     if _LANGCHAIN_GOOGLE_IMPORT_ERROR is not None or ChatGoogleGenerativeAI is None or HumanMessage is None:
         raise HTTPException(status_code=500, detail=f"langchain-google-genai를 불러올 수 없습니다: {_LANGCHAIN_GOOGLE_IMPORT_ERROR}")
     if not settings.google_api_key:
         raise HTTPException(status_code=503, detail="GOOGLE_API_KEY가 설정되지 않았습니다.")
 
-    prompt = _build_text_prompt(food_text)
+    prompt = _build_text_prompt(food_text, lang)
     message = HumanMessage(content=[{"type": "text", "text": prompt}])
     llm = ChatGoogleGenerativeAI(
         model=settings.gemini_model_id,
@@ -475,19 +569,19 @@ async def _analyze_text_with_gemini(settings: Settings, food_text: str) -> Calor
 
     text = _message_content_to_text(response.content)
     try:
-        return _llm_text_to_calorie_result(None, text, source="gemini")
+        return _llm_text_to_calorie_result(None, text, source="gemini", lang=lang)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("Gemini 텍스트 응답 JSON 파싱 실패: %s", text[:500])
         raise HTTPException(status_code=502, detail=f"Gemini 응답 변환 실패: {exc}") from exc
 
 
-async def _analyze_text_with_claude(settings: Settings, food_text: str) -> CalorieResult:
+async def _analyze_text_with_claude(settings: Settings, food_text: str, lang: str = "ko") -> CalorieResult:
     if _LANGCHAIN_ANTHROPIC_IMPORT_ERROR is not None or ChatAnthropic is None or HumanMessage is None:
         raise HTTPException(status_code=500, detail=f"langchain-anthropic을 불러올 수 없습니다: {_LANGCHAIN_ANTHROPIC_IMPORT_ERROR}")
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY가 설정되지 않았습니다.")
 
-    prompt = _build_text_prompt(food_text)
+    prompt = _build_text_prompt(food_text, lang)
     message = HumanMessage(content=[{"type": "text", "text": prompt}])
     llm = ChatAnthropic(
         model=settings.claude_model_id,
@@ -504,7 +598,7 @@ async def _analyze_text_with_claude(settings: Settings, food_text: str) -> Calor
 
     text = _message_content_to_text(response.content)
     try:
-        return _llm_text_to_calorie_result(None, text, source="claude")
+        return _llm_text_to_calorie_result(None, text, source="claude", lang=lang)
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning("Claude 텍스트 응답 JSON 파싱 실패: %s", text[:500])
         raise HTTPException(status_code=502, detail=f"Claude 응답 변환 실패: {exc}") from exc
@@ -513,17 +607,18 @@ async def _analyze_text_with_claude(settings: Settings, food_text: str) -> Calor
 # ---------------------------------------------------------------------------
 # Public API — 텍스트 분석
 # ---------------------------------------------------------------------------
-async def analyze_text_parallel_consensus(settings: Settings, food_text: str) -> CalorieResult:
+async def analyze_text_parallel_consensus(settings: Settings, food_text: str, lang: str = "ko") -> CalorieResult:
     """Gemini + Claude 병렬 텍스트 분석 후 AI별 결과를 반환합니다."""
     results = await asyncio.gather(
-        _analyze_text_with_gemini(settings, food_text),
-        _analyze_text_with_claude(settings, food_text),
+        _analyze_text_with_gemini(settings, food_text, lang),
+        _analyze_text_with_claude(settings, food_text, lang),
         return_exceptions=True,
     )
     return _finalize_parallel_results(
         results[0], results[1],
         image_received=False,
         image_size_bytes=None,
+        lang=lang,
     )
 
 

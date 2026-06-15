@@ -29,6 +29,7 @@ class Settings:
     gemini_model_id: str
     claude_model_id: str
     prompt: str
+    prompt_en: str
 
 
 def load_settings() -> Settings:
@@ -66,11 +67,36 @@ def load_settings() -> Settings:
         )
     ).strip()
 
+    prompt_en = (
+        os.getenv("NUTRITION_PROMPT_EN")
+        or (
+            "Analyze the food in the image and respond ONLY in the following JSON array format. "
+            "Do not include any explanatory text. "
+            "If there are multiple foods, add an element for each one. "
+            "If there is no food in the image, the food cannot be identified, the image is too "
+            "blurry, or the photo is unrelated to food, respond with an empty array []. "
+            "Write all food names and portion descriptions in English. "
+            "All numeric values must be plain numbers without units.\n\n"
+            "[\n"
+            "  {\n"
+            '    "food_name": "Food name in English",\n'
+            '    "calories_kcal": calorie_number,\n'
+            '    "portion_description": "Estimated serving size",\n'
+            '    "carbs_g": carbohydrate_grams_number,\n'
+            '    "protein_g": protein_grams_number,\n'
+            '    "fat_g": fat_grams_number,\n'
+            '    "confidence": confidence_number_between_0_and_1\n'
+            "  }\n"
+            "]"
+        )
+    ).strip()
+
     return Settings(
         google_api_key=google_api_key,
         anthropic_api_key=anthropic_api_key,
         gemini_model_id=gemini_model_id,
         claude_model_id=claude_model_id,
         prompt=prompt,
+        prompt_en=prompt_en,
     )
 
