@@ -215,6 +215,38 @@ def _normalize_lang(lang: Optional[str]) -> str:
     return "en" if (lang or "").strip().lower().startswith("en") else "ko"
 
 
+def lang_from_accept_language(accept_language: Optional[str]) -> str:
+    """
+    `Accept-Language` 헤더(예: "en-US,en;q=0.9,ko;q=0.8")에서
+    우선순위가 가장 높은 언어를 골라 "en" 또는 "ko"로 정규화합니다.
+    헤더가 없거나 파싱할 수 없으면 "ko"를 기본값으로 사용합니다.
+    """
+    if not accept_language:
+        return "ko"
+
+    best_tag, best_q = "ko", -1.0
+    for part in accept_language.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        tag, _, q_part = part.partition(";")
+        tag = tag.strip()
+        if not tag:
+            continue
+        q = 1.0
+        q_part = q_part.strip()
+        if q_part.startswith("q="):
+            try:
+                q = float(q_part[2:])
+            except ValueError:
+                q = 1.0
+        if q > best_q:
+            best_q = q
+            best_tag = tag
+
+    return _normalize_lang(best_tag.split("-")[0])
+
+
 _DISCLAIMER = {
     "ko": "본 결과는 생성형 AI의 추정치이며 의학적·영양학적 진단 또는 개인별 식단 지침을 대체하지 않습니다.",
     "en": "These results are AI-generated estimates and are not a substitute for medical or nutritional advice.",

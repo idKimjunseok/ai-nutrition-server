@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
 
 from app.core.config import load_settings
 from app.models.schemas import CalorieResult, DailyCalorieRequest, DailyCalorieResult
@@ -10,6 +10,7 @@ from app.services.nutrition_service import (
     analyze_daily_calories_parallel_consensus,
     analyze_image_parallel_consensus,
     analyze_text_parallel_consensus,
+    lang_from_accept_language,
 )
 from app.utils.image_utils import prepare_image_for_llm, upload_looks_acceptable
 
@@ -24,10 +25,11 @@ def health() -> dict:
 @router.post("/v1/analyze-food", response_model=CalorieResult, response_model_by_alias=True)
 async def analyze_food(
     image: UploadFile = File(..., description="음식 사진 바이너리 (JPEG, PNG, HEIC)"),
-    lang: str = Query("ko", description="응답 언어 (ko 또는 en, 기본값 ko). 기기 locale을 전달하세요."),
+    accept_language: Optional[str] = Header(None, description="응답 언어 결정 (예: en-US,en;q=0.9,ko;q=0.8). 기기 locale을 전달하세요."),
 ):
     """이미지를 업로드하면 Gemini + Claude가 음식과 칼로리를 분석합니다."""
     settings = load_settings()
+    lang = lang_from_accept_language(accept_language)
 
     try:
         raw = await image.read()
@@ -57,7 +59,7 @@ async def analyze_food(
 @router.get("/v1/analyze-food-text", response_model=CalorieResult, response_model_by_alias=True)
 async def analyze_food_text(
     text: str = Query(..., description="분석할 음식명. 쉼표·공백 구분 가능 (예: 우동,새우튀김)"),
-    lang: str = Query("ko", description="응답 언어 (ko 또는 en, 기본값 ko). 기기 locale을 전달하세요."),
+    accept_language: Optional[str] = Header(None, description="응답 언어 결정 (예: en-US,en;q=0.9,ko;q=0.8). 기기 locale을 전달하세요."),
 ):
     """
     음식명 텍스트를 쿼리 파라미터로 입력하면 Gemini + Claude가 칼로리를 분석합니다.
@@ -67,6 +69,7 @@ async def analyze_food_text(
     - 혼합:      `?text=우동,새우튀김 김밥`
     """
     settings = load_settings()
+    lang = lang_from_accept_language(accept_language)
 
     food_text = text.strip()
     if not food_text:
