@@ -22,7 +22,10 @@ def health() -> dict:
 
 
 @router.post("/v1/analyze-food", response_model=CalorieResult, response_model_by_alias=True)
-async def analyze_food(image: UploadFile = File(..., description="음식 사진 바이너리 (JPEG, PNG, HEIC)")):
+async def analyze_food(
+    image: UploadFile = File(..., description="음식 사진 바이너리 (JPEG, PNG, HEIC)"),
+    lang: str = Query("ko", description="응답 언어 (ko 또는 en, 기본값 ko). 기기 locale을 전달하세요."),
+):
     """이미지를 업로드하면 Gemini + Claude가 음식과 칼로리를 분석합니다."""
     settings = load_settings()
 
@@ -48,12 +51,13 @@ async def analyze_food(image: UploadFile = File(..., description="음식 사진 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await analyze_image_parallel_consensus(settings, prepared, mime, len(raw))
+    return await analyze_image_parallel_consensus(settings, prepared, mime, len(raw), lang)
 
 
 @router.get("/v1/analyze-food-text", response_model=CalorieResult, response_model_by_alias=True)
 async def analyze_food_text(
     text: str = Query(..., description="분석할 음식명. 쉼표·공백 구분 가능 (예: 우동,새우튀김)"),
+    lang: str = Query("ko", description="응답 언어 (ko 또는 en, 기본값 ko). 기기 locale을 전달하세요."),
 ):
     """
     음식명 텍스트를 쿼리 파라미터로 입력하면 Gemini + Claude가 칼로리를 분석합니다.
@@ -68,7 +72,7 @@ async def analyze_food_text(
     if not food_text:
         raise HTTPException(status_code=400, detail="음식명을 입력해주세요.")
 
-    return await analyze_text_parallel_consensus(settings, food_text)
+    return await analyze_text_parallel_consensus(settings, food_text, lang)
 
 
 @router.get("/v1/recommend-daily-calories", response_model=DailyCalorieResult, response_model_by_alias=True)
