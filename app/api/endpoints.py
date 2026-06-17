@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 
 from app.core.config import load_settings
+from app.core.rate_limit import limiter
+from app.core.security import verify_api_key
 from app.models.schemas import CalorieResult, DailyCalorieRequest, DailyCalorieResult
 from app.services.nutrition_service import (
     analyze_daily_calories_parallel_consensus,
@@ -22,8 +24,10 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@router.post("/v1/analyze-food", response_model=CalorieResult, response_model_by_alias=True)
+@router.post("/v1/analyze-food", response_model=CalorieResult, response_model_by_alias=True, dependencies=[Depends(verify_api_key)])
+@limiter.limit("20/minute")
 async def analyze_food(
+    request: Request,
     image: UploadFile = File(..., description="음식 사진 바이너리 (JPEG, PNG, HEIC)"),
     accept_language: Optional[str] = Header(None, description="응답 언어 결정 (예: en-US,en;q=0.9,ko;q=0.8). 기기 locale을 전달하세요."),
 ):
@@ -56,8 +60,10 @@ async def analyze_food(
     return await analyze_image_parallel_consensus(settings, prepared, mime, len(raw), lang)
 
 
-@router.get("/v1/analyze-food-text", response_model=CalorieResult, response_model_by_alias=True)
+@router.get("/v1/analyze-food-text", response_model=CalorieResult, response_model_by_alias=True, dependencies=[Depends(verify_api_key)])
+@limiter.limit("20/minute")
 async def analyze_food_text(
+    request: Request,
     text: str = Query(..., description="분석할 음식명. 쉼표·공백 구분 가능 (예: 우동,새우튀김)"),
     accept_language: Optional[str] = Header(None, description="응답 언어 결정 (예: en-US,en;q=0.9,ko;q=0.8). 기기 locale을 전달하세요."),
 ):
@@ -78,8 +84,10 @@ async def analyze_food_text(
     return await analyze_text_parallel_consensus(settings, food_text, lang)
 
 
-@router.get("/v1/recommend-daily-calories", response_model=DailyCalorieResult, response_model_by_alias=True)
+@router.get("/v1/recommend-daily-calories", response_model=DailyCalorieResult, response_model_by_alias=True, dependencies=[Depends(verify_api_key)])
+@limiter.limit("20/minute")
 async def recommend_daily_calories(
+    request: Request,
     age: int = Query(..., ge=1, le=120, description="나이"),
     gender: str = Query(..., description="성별 (male/female 또는 남성/여성)"),
     weight_kg: Optional[float] = Query(None, gt=0, le=500, alias="weightKg", description="몸무게 kg (선택)"),
