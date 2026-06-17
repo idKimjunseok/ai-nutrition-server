@@ -30,6 +30,7 @@ class Settings:
     claude_model_id: str
     prompt: str
     prompt_en: str
+    api_key: str
 
 
 def load_settings() -> Settings:
@@ -91,6 +92,8 @@ def load_settings() -> Settings:
         )
     ).strip()
 
+    api_key = (os.getenv("API_KEY") or "").strip()
+
     return Settings(
         google_api_key=google_api_key,
         anthropic_api_key=anthropic_api_key,
@@ -98,5 +101,6 @@ def load_settings() -> Settings:
         claude_model_id=claude_model_id,
         prompt=prompt,
         prompt_en=prompt_en,
+        api_key=api_key,
     )
 

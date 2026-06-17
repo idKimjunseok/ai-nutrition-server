@@ -12,14 +12,20 @@ FastAPI 앱 엔트리포인트.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.endpoints import router
+from app.core.rate_limit import limiter
 
 app = FastAPI(
     title="AI Nutrition (Consensus)",
     description="이미지 업로드 → Gemini/Claude 병렬 분석 → 합의 결과(JSON) 반환",
     version="1.0.0",
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
