@@ -360,4 +360,13 @@ private val BASE_URL = if (Build.FINGERPRINT.contains("generic")) {
 
 ```
 http://localhost:8000/docs
+
+---
+
+## 배포 (Railway)
+
+`main` 브랜치에 push하면 Railway가 GitHub 연동을 통해 자동으로 빌드·배포합니다.
+
+- 배포 주소: https://ai-nutrition-server-production.up.railway.app
+- 환경변수(`GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `API_KEY`)는 Railway 프로젝트 Variables에서 관리합니다.
 ```
