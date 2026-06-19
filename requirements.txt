@@ -1,0 +1,11 @@
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+pydantic==2.13.3
+python-dotenv==1.2.1
+langchain-core==0.3.84
+langchain-google-genai==2.1.12
+langchain-anthropic==0.3.22
+pillow==11.3.0
+pillow-heif>=0.18,<1.0
+python-multipart==0.0.20
+slowapi==0.1.10
