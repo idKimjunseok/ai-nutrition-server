@@ -44,9 +44,7 @@ ai-nutrition-server/
 ### 1. 패키지 설치
 
 ```bash
-pip install fastapi uvicorn python-dotenv pydantic
-pip install langchain-google-genai langchain-anthropic langchain-core
-pip install pillow pillow-heif   # HEIC 이미지 지원 (선택)
+pip install -r requirements.txt
 ```
 
 ### 2. 환경변수 설정
@@ -350,7 +348,9 @@ private val BASE_URL = if (Build.FINGERPRINT.contains("generic")) {
 | `ANTHROPIC_API_KEY` | — | Anthropic API 키 **(필수)** |
 | `GEMINI_MODEL_ID` | `gemini-2.5-flash` | Gemini 모델 ID |
 | `CLAUDE_MODEL_ID` | `claude-sonnet-4-6` | Claude 모델 ID |
-| `NUTRITION_PROMPT` | 내장 프롬프트 | 이미지 분석 시 AI에 전달할 프롬프트 |
+| `NUTRITION_PROMPT` | 내장 프롬프트 (한국어) | 이미지 분석 시 AI에 전달할 프롬프트 |
+| `NUTRITION_PROMPT_EN` | 내장 프롬프트 (영어) | `Accept-Language: en` 요청 시 사용할 프롬프트 |
+| `API_KEY` | — (미설정 시 인증 스킵) | `X-API-Key` 헤더 인증 키. 운영 환경에서는 필수 |
 
 ---
 
@@ -360,6 +360,37 @@ private val BASE_URL = if (Build.FINGERPRINT.contains("generic")) {
 
 ```
 http://localhost:8000/docs
+```
+
+배포 환경에서는 `https://ai-nutrition-server-production-618a.up.railway.app/docs` 로 접속하세요.
+`X-API-Key` 인증이 필요한 엔드포인트는 우측 상단 **Authorize** 버튼에 키를 입력해야 "Try it out"이 동작합니다.
+
+---
+
+## 인증 & Rate Limiting
+
+| 항목 | 내용 |
+|---|---|
+| 인증 | `X-API-Key` 헤더 (값은 `API_KEY` 환경변수와 일치해야 함). `API_KEY` 미설정 시 인증 스킵 (로컬 개발용) |
+| Rate Limit | IP당 분당 20회 (`/v1/*` 엔드포인트, 초과 시 `429`) |
+
+```bash
+curl "https://ai-nutrition-server-production-618a.up.railway.app/v1/analyze-food-text?text=김치찌개" \
+  -H "X-API-Key: your_api_key"
+```
+
+---
+
+## 다국어 응답 (Accept-Language)
+
+`/v1/analyze-food`, `/v1/analyze-food-text` 요청 시 `Accept-Language` 헤더로 응답 언어(한국어/영어)를 결정합니다. 헤더 미전송 시 기본값은 한국어입니다.
+
+```bash
+curl "https://ai-nutrition-server-production-618a.up.railway.app/v1/analyze-food-text?text=kimchi%20stew" \
+  -H "Accept-Language: en"
+```
+
+Retrofit/OkHttp에서는 인터셉터로 모든 요청에 `Accept-Language`를 자동으로 붙이면 편리합니다.
 
 ---
 
@@ -369,4 +400,3 @@ http://localhost:8000/docs
 
 - 배포 주소: https://ai-nutrition-server-production-618a.up.railway.app
 - 환경변수(`GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `API_KEY`)는 Railway 프로젝트 Variables에서 관리합니다.
-```
