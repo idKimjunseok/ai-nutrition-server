@@ -21,21 +21,43 @@
 
 ```
 ai-nutrition-server/
-├── main.py                        # FastAPI 앱 진입점
-├── .env                           # API 키 (Git 제외)
-├── .env.example                   # 환경변수 예시
+├── main.py                          # FastAPI 앱 진입점
+├── .env                             # API 키 (Git 제외)
+├── .env.example                     # 환경변수 예시
 └── app/
     ├── api/
-    │   └── endpoints.py           # 라우터 (4개 엔드포인트)
+    │   └── endpoints.py             # 라우터 (4개 엔드포인트)
     ├── core/
-    │   └── config.py              # 환경변수 로드 (Settings)
+    │   ├── config.py                # 환경변수 로드 (Settings)
+    │   ├── security.py              # X-API-Key 인증
+    │   └── rate_limit.py            # IP당 분당 호출 제한
     ├── models/
-    │   └── schemas.py             # Pydantic 응답 모델
+    │   └── schemas.py               # Pydantic 응답 모델
     ├── services/
-    │   └── nutrition_service.py   # AI 호출·파싱·병렬 처리 로직
+    │   ├── nutrition_service.py     # 오케스트레이션: 병렬 호출 + 결과 합치기
+    │   ├── i18n.py                  # 언어 판별(Accept-Language) + 다국어 메시지
+    │   ├── parsing.py               # LLM 텍스트 → JSON → Pydantic 모델 변환
+    │   ├── providers/
+    │   │   ├── common.py            # 공통 타임아웃 래퍼
+    │   │   ├── gemini.py            # Gemini 클라이언트 생성·호출
+    │   │   └── claude.py            # Claude 클라이언트 생성·호출
+    │   └── prompts/
+    │       ├── image_prompt.py      # 이미지 분석 프롬프트 선택 (ko/en)
+    │       ├── text_prompt.py       # 텍스트 분석 프롬프트 디스패처
+    │       ├── text_prompt_ko.py    # 텍스트 분석 한국어 프롬프트
+    │       ├── text_prompt_en.py    # 텍스트 분석 영어 프롬프트
+    │       └── daily_calorie_prompt.py  # 하루 권장 칼로리 프롬프트
     └── utils/
-        └── image_utils.py         # 이미지 전처리 (HEIC→JPEG 변환 등)
+        └── image_utils.py           # 이미지 전처리 (HEIC→JPEG 변환 등)
 ```
+
+서비스 계층은 역할별로 분리되어 있습니다.
+
+- `providers/` — AI별 클라이언트 생성과 호출/응답 추출만 담당 (Gemini ↔ Claude 완전 독립)
+- `prompts/` — 이미지/텍스트/하루칼로리 프롬프트, 텍스트 프롬프트는 한국어·영어 파일로 분리
+- `i18n.py` — `Accept-Language` 파싱과 모든 응답 메시지(공지문, 실패 메시지 등)
+- `parsing.py` — LLM 응답 텍스트를 JSON으로 파싱하고 Pydantic 모델로 변환
+- `nutrition_service.py` — 위 모듈들을 조합해 Gemini/Claude를 병렬 호출하고 최종 결과를 합치는 오케스트레이션만 수행
 
 ---
 
