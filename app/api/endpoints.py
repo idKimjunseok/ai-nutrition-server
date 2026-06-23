@@ -8,11 +8,11 @@ from app.core.config import load_settings
 from app.core.rate_limit import limiter
 from app.core.security import verify_api_key
 from app.models.schemas import CalorieResult, DailyCalorieRequest, DailyCalorieResult
+from app.services.i18n import lang_from_accept_language
 from app.services.nutrition_service import (
     analyze_daily_calories_parallel_consensus,
     analyze_image_parallel_consensus,
     analyze_text_parallel_consensus,
-    lang_from_accept_language,
 )
 from app.utils.image_utils import prepare_image_for_llm, upload_looks_acceptable
 
