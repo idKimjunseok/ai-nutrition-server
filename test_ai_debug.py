@@ -13,16 +13,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.core.config import load_settings
-from app.services.nutrition_service import (
-    _analyze_with_claude,
-    _analyze_with_gemini,
-    _parse_json_from_llm,
-    _normalize_food_dicts,
-    _message_content_to_text,
-    _strip_json_fence,
-    _lc_image_url_block,
-    _anthropic_image_block,
-)
+from app.services.parsing import parse_json_from_llm, _normalize_food_dicts, _strip_json_fence
+from app.services.providers.claude import _image_block as _anthropic_image_block
+from app.services.providers.common import message_content_to_text as _message_content_to_text
+from app.services.providers.gemini import _image_url_block as _lc_image_url_block
 from app.utils.image_utils import prepare_image_for_llm
 
 
@@ -75,7 +69,7 @@ def diagnose_parse(label: str, raw_text: str) -> None:
 
     print(f"\n[{label}] JSON 파싱 결과:")
     try:
-        parsed = _parse_json_from_llm(raw_text)
+        parsed = parse_json_from_llm(raw_text)
         print(json.dumps(parsed, ensure_ascii=False, indent=2)[:2000])
     except ValueError as e:
         print(f"  ❌ 파싱 실패: {e}")
