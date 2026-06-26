@@ -35,6 +35,7 @@ ai-nutrition-server/
     │   └── schemas.py               # Pydantic 응답 모델
     ├── services/
     │   ├── nutrition_service.py     # 오케스트레이션: 병렬 호출 + 결과 합치기
+    │   ├── feedback_service.py      # 피드백 메일 발송 (Resend API)
     │   ├── i18n.py                  # 언어 판별(Accept-Language) + 다국어 메시지
     │   ├── parsing.py               # LLM 텍스트 → JSON → Pydantic 모델 변환
     │   ├── providers/
@@ -220,6 +221,27 @@ curl "http://localhost:8000/v1/recommend-daily-calories?age=30&gender=male&weigh
 
 ---
 
+### `POST /v1/feedback`
+
+앱에서 보낸 사용자 피드백을 [Resend](https://resend.com) API를 통해 지정된 이메일로 전송합니다.
+
+| 항목 | 내용 |
+|---|---|
+| Method | `POST` |
+| Content-Type | `application/json` |
+| 성공 응답 | `204 No Content` |
+
+**요청**
+
+```bash
+curl -X POST "http://localhost:8000/v1/feedback" \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "피드백 내용"}'
+```
+
+---
+
 ## 응답 데이터 구조
 
 ### CalorieResult (음식 분석 공통)
@@ -287,6 +309,12 @@ interface NutritionApi {
         @Query("weightKg") weightKg: Float? = null,
         @Query("heightCm") heightCm: Float? = null
     ): DailyCalorieResult
+
+    // 피드백 전송
+    @POST("v1/feedback")
+    suspend fun sendFeedback(
+        @Body request: FeedbackRequest
+    ): Response<Unit>
 }
 ```
 
@@ -322,6 +350,10 @@ data class Macros(
 
 data class DailyCalorieResult(
     val dailyCaloriesKcal: Float
+)
+
+data class FeedbackRequest(
+    val message: String
 )
 ```
 
@@ -373,6 +405,9 @@ private val BASE_URL = if (Build.FINGERPRINT.contains("generic")) {
 | `NUTRITION_PROMPT` | 내장 프롬프트 (한국어) | 이미지 분석 시 AI에 전달할 프롬프트 |
 | `NUTRITION_PROMPT_EN` | 내장 프롬프트 (영어) | `Accept-Language: en` 요청 시 사용할 프롬프트 |
 | `API_KEY` | — (미설정 시 인증 스킵) | `X-API-Key` 헤더 인증 키. 운영 환경에서는 필수 |
+| `RESEND_API_KEY` | — | [Resend](https://resend.com) API 키. `/v1/feedback` 메일 발송에 사용 |
+| `FEEDBACK_EMAIL_TO` | — | 피드백을 수신할 이메일 주소 |
+| `FEEDBACK_EMAIL_FROM` | `onboarding@resend.dev` | 발신자 이메일 (도메인 인증 전 기본값) |
 
 ---
 
