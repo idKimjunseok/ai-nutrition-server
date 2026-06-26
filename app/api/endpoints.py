@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Requ
 from app.core.config import load_settings
 from app.core.rate_limit import limiter
 from app.core.security import verify_api_key
-from app.models.schemas import CalorieResult, DailyCalorieRequest, DailyCalorieResult
+from app.models.schemas import CalorieResult, DailyCalorieRequest, DailyCalorieResult, FeedbackRequest
+from app.services.feedback_service import send_feedback_email
 from app.services.i18n import lang_from_accept_language
 from app.services.nutrition_service import (
     analyze_daily_calories_parallel_consensus,
@@ -103,3 +104,11 @@ async def recommend_daily_calories(
     settings = load_settings()
     request = DailyCalorieRequest(age=age, gender=gender, weight_kg=weight_kg, height_cm=height_cm)
     return await analyze_daily_calories_parallel_consensus(settings, request)
+
+
+@router.post("/v1/feedback", status_code=204, dependencies=[Depends(verify_api_key)])
+@limiter.limit("20/minute")
+async def submit_feedback(request: Request, feedback: FeedbackRequest) -> None:
+    """앱에서 보낸 피드백을 지정된 이메일로 전송합니다."""
+    settings = load_settings()
+    await send_feedback_email(settings, feedback.message.strip())

@@ -31,6 +31,9 @@ class Settings:
     prompt: str
     prompt_en: str
     api_key: str
+    resend_api_key: str
+    feedback_email_to: str
+    feedback_email_from: str
 
 
 def load_settings() -> Settings:
@@ -94,6 +97,10 @@ def load_settings() -> Settings:
 
     api_key = (os.getenv("API_KEY") or "").strip()
 
+    resend_api_key = (os.getenv("RESEND_API_KEY") or "").strip()
+    feedback_email_to = (os.getenv("FEEDBACK_EMAIL_TO") or "").strip()
+    feedback_email_from = (os.getenv("FEEDBACK_EMAIL_FROM") or "onboarding@resend.dev").strip()
+
     return Settings(
         google_api_key=google_api_key,
         anthropic_api_key=anthropic_api_key,
@@ -102,5 +109,8 @@ def load_settings() -> Settings:
         prompt=prompt,
         prompt_en=prompt_en,
         api_key=api_key,
+        resend_api_key=resend_api_key,
+        feedback_email_to=feedback_email_to,
+        feedback_email_from=feedback_email_from,
     )
 
