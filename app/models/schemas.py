@@ -6,6 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 
+class FeedbackRequest(BaseModel):
+    """앱에서 보내는 사용자 피드백 요청 모델."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    message: str = Field(..., min_length=1, max_length=4000, description="피드백 내용")
+
+
 class DailyCalorieRequest(BaseModel):
     """하루 권장 칼로리 분석 요청 모델."""
 
